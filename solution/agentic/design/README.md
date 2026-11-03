@@ -194,6 +194,8 @@ show them working against the real model.
 Every decision is recorded twice:
 - in the ticket's `trace`, a list of readable lines shown in the notebook;
 - in a structured event log, `logs/events.jsonl`, with one JSON object per line. The path can be changed with `UDAHUB_EVENT_LOG`, and the file is git-ignored.
+  [`sample_events.jsonl`](sample_events.jsonl) is a committed sample from 4 real-model tickets: a resolved
+  knowledge question, a repeat issue, a refund request and a request for a human.
 
 Each event has the same base fields: `ts`, `ticket_id`, `agent`, `event` and `message`. Each kind of event adds its own:
 
