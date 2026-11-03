@@ -113,7 +113,7 @@ The tests need no API key. Each one runs against a temporary copy of the databas
   - a RAG resolution
   - a low-confidence answer that gets escalated
   - a blocked customer who is escalated straight away
-  - a multi-turn guest who is identified by email, with short-term and long-term memory recall
+  - a multi-turn guest who proves their email with a one-time code, with short-term and long-term memory recall
   - a refund request that forces escalation and stores a new memory
   - a memory about reservation state that is filtered out before it reaches the database
   - a memory writer that only sees the customer's messages, never the assistant's replies
@@ -127,6 +127,8 @@ The tests need no API key. Each one runs against a temporary copy of the databas
 These are the results of running the 13 scenarios in `03_agentic_app.ipynb` against the real model (`gpt-4o-mini`
 with `text-embedding-3-small` for retrieval). The executed notebook, with every decision trace and reply, is
 committed in `solution/`.
+
+> **Note:** this run was recorded before email verification and change confirmation were added (3 Nov 2026). Today, scenario 3's guest also replies with a one-time code sent to their email before being identified, and scenario 2's cancellation waits for the customer to reply YES.
 
 | # | Ticket | Route and tools | Outcome | Long-term memory |
 |---|---|---|---|---|
@@ -150,6 +152,7 @@ The safeguards each did their job during the run:
 - **Id guard:** in most of our runs of scenario 2, the agent first tried to cancel with an id it guessed. The tool refused it, and the agent looked the reservation up before cancelling. In other runs, including the committed one, the agent looked it up first. Either way the outcome is the same, and `test_account_tools_refuse_ids_not_looked_up` checks the guard directly.
 - **Policy escalation:** refunds and blocked accounts always reached a human, whatever the model drafted.
 - **Repeat issues:** in scenario 6 Bob's previous ticket was a login problem, so the supervisor escalated him straight away. This took the same route in 4 out of 4 runs.
+- **Identity and confirmation (added after this run):** typing an email doesn't identify a guest. They get a one-time code by email and are identified only after replying with it, and the reply is the same whether or not the email has an account. Cancelling a reservation or changing the subscription waits for the customer's YES, checked in code.
 - **Memory hygiene:** memories are third-person summaries of what the customer wrote, never the assistant's replies. Reservation state, named experiences, one-off requests, contact details, claims of a special status or permission ("my refunds are pre-approved") and duplicates are not stored. Such claims are flagged as unverified in the handoff note to the human team.
 
 The model's wording varies from run to run, but the routes and outcomes above were the same across repeated runs.

@@ -86,7 +86,7 @@ Why Supervisor rather than the alternatives:
 | `quality_gate` | LLM, structured output, plus rules | Scores the draft against the evidence (articles or tool results) for confidence, grounding, whether a human is needed and whether it waits on the customer. `should_escalate` then decides deterministically. |
 | `approve` | deterministic | Runs when the quality gate passes the draft, and makes the draft the reply. |
 | `escalation_agent` | LLM, structured output | Picks the team and priority, writes a handoff note (stored as a `system` ticket message) and an empathetic reply. It never reveals block reasons and never promises refunds. |
-| `request_info` | deterministic, LLM only to translate | Asks the customer to identify themselves and keeps the ticket open (`awaiting_customer`). The fixed message is translated into the customer's language if they don't write in English. |
+| `request_info` | deterministic, LLM only to translate | Asks the customer to identify themselves: for their email, then for the one-time code sent to it (the same reply whether or not the email has an account). It keeps the ticket open (`awaiting_customer`). The fixed message is translated into the customer's language if they don't write in English. |
 | `finalize` | deterministic | Appends the reply to the conversation, persists it, and updates the ticket's status, issue type and tags. |
 | `write_memory` | LLM, structured output, plus filters | Extracts durable preferences, personal facts and reported issues as third-person summaries. Code then drops reservation state, one-off requests and permission claims and skips duplicates. Secrets and payment data are never stored. |
 
@@ -177,6 +177,9 @@ Each decision with real consequences is enforced in code rather than left to a p
 | Risk | Safeguard | Where |
 |---|---|---|
 | Acting on another customer's account | Tools have the customer id bound in, and ownership is checked | `build_account_tools`, `cancel_reservation` |
+| A guest posing as a customer by typing their email | The guest is identified only after replying with a one-time code sent to that email (hashed in the state, 10 minutes, 3 attempts) | `_verify_guest`, `tools/verification.py` |
+| Finding out which emails have an account | The reply is the same for known and unknown emails, and no code is sent to an unknown one | `VERIFICATION_MESSAGES`, `verification.start` |
+| Cancelling or changing the subscription without the customer's say-so | The tool first returns `needs_confirmation`; the change runs only if the customer's next message is a clear yes, checked in code | `build_account_tools`, `is_confirmation` |
 | Acting on a guessed id | Booking and cancellation refuse ids that no lookup returned in the same turn | `build_account_tools` |
 | Breaking business rules | Blocked accounts, subscription status, tier, slots, quota and double booking are checked before every change | `reserve_experience`, `manage_subscription` |
 | A tool failure crashing the run | Unexpected tool errors are caught and returned to the agent as a structured error | `_safe` in `cultpass_tools.py` |
@@ -204,7 +207,7 @@ Each event has the same base fields: `ts`, `ticket_id`, `agent`, `event` and `me
 |---|---|---|
 | `load_context` | memory | `customer`, `identified`, `ticket_status`, `memories`, `prior_tickets` |
 | `classify` | classifier | `issue_type`, `urgency`, `sentiment`, `requires_account_action`, `human_requested`, `language`, `confidence` |
-| `identify`, `route` | supervisor | `customer`; `route`, `reason` |
+| `identify`, `route` | supervisor | `customer`, `verification`; `route`, `reason` |
 | `retrieve` | knowledge_agent | `articles`: title and score |
 | `tools` | account_agent | `tools`: tool, args, success |
 | `assess`, `approve` | quality_gate | `confidence`, `grounded`, `answered_by_evidence`, `needs_human`, `awaiting_customer`, `reason` |

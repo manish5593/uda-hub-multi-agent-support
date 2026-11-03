@@ -42,4 +42,5 @@ def isolated_dbs(tmp_path, monkeypatch):
         monkeypatch.setattr(config, name, copy)
     _move_dates_to_today(config.CULTPASS_DB_PATH)
     monkeypatch.setattr(config, "EVENT_LOG_PATH", tmp_path / "events.jsonl")
+    monkeypatch.setattr(config, "OUTBOX_PATH", tmp_path / "outbox.jsonl")
     yield

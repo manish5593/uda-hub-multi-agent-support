@@ -1,4 +1,8 @@
 """Tests for the deterministic building blocks: tools, routing, retrieval and escalation rules."""
+import json
+import re
+
+from agentic import config
 from agentic.agents.quality_gate import should_escalate
 from agentic.agents.supervisor import route_ticket
 from agentic.tools import cultpass_tools as cp
@@ -148,11 +152,11 @@ def test_account_tools_refuse_ids_not_looked_up():
     tools["find_experiences"].invoke({})
     booked = tools["book_experience"].invoke({"experience_id": experience_id})
     assert booked["success"], booked
-    # a reservation the agent just made can be cancelled without another lookup
-    assert tools["cancel_my_reservation"].invoke({"reservation_id": booked["reservation_id"]})["success"]
+    # a reservation the agent just made is a known id (cancelling it still needs the customer's yes)
+    assert tools["cancel_my_reservation"].invoke({"reservation_id": booked["reservation_id"]})["needs_confirmation"]
 
     tools["get_my_reservations"].invoke({})
-    assert tools["cancel_my_reservation"].invoke({"reservation_id": reservation_id})["success"]
+    assert tools["cancel_my_reservation"].invoke({"reservation_id": reservation_id})["needs_confirmation"]
 
     # a fresh turn starts with nothing looked up
     fresh = {t.name: t for t in cp.build_account_tools(BOB, "t-1")}
@@ -257,6 +261,69 @@ def test_experience_search_marks_what_the_customer_already_booked():
     results = {e["title"]: e["already_booked"] for e in tools["find_experiences"].invoke({})}
     assert results["Samba Night at Lapa"] is True  # in Bob's seeded reservations
     assert results["Modern Art at MASP"] is False
+
+
+def test_cancel_and_subscription_changes_need_the_customers_confirmation():
+    tools = {t.name: t for t in cp.build_account_tools(BOB, "t-1")}
+    reservation_id = tools["get_my_reservations"].invoke({})[0]["reservation_id"]
+
+    asked = tools["cancel_my_reservation"].invoke({"reservation_id": reservation_id})
+    assert asked["needs_confirmation"] and asked["success"] is False
+    assert asked["action"] == {"tool": "cancel_my_reservation", "reservation_id": reservation_id}
+    assert "reply YES" in asked["error"]
+    assert tools["change_subscription"].invoke({"action": "cancel"})["needs_confirmation"]
+    # nothing changed yet
+    assert cp.list_reservations(BOB)[0]["status"] == "reserved"
+    assert cp.get_customer_profile(BOB)["subscription"]["status"] == "active"
+
+    # once the customer confirmed, the same action runs (and only that one)
+    confirmed = {t.name: t for t in cp.build_account_tools(BOB, "t-1", confirmed_action=asked["action"])}
+    assert confirmed["change_subscription"].invoke({"action": "cancel"})["needs_confirmation"]
+    assert confirmed["cancel_my_reservation"].invoke({"reservation_id": reservation_id})["success"]
+    assert next(r for r in cp.list_reservations(BOB) if r["reservation_id"] == reservation_id)["status"] == "cancelled"
+
+
+def test_only_a_clear_yes_confirms():
+    from agentic.agents.account_agent import is_confirmation
+    for text in ["yes", "Yes, please cancel it", "OK", "confirm", "sure, go ahead", "Sim", "y"]:
+        assert is_confirmation(text), text
+    for text in ["no", "No, keep it", "yes... wait, don't", "maybe", "what time is it?", "yesterday I booked it", ""]:
+        assert not is_confirmation(text), text
+
+
+def test_verification_codes_are_hashed_expire_and_lock():
+    from datetime import datetime, timedelta, timezone
+    from agentic.tools import verification
+    profile = {"user_id": BOB, "name": "Bob Stone"}
+    pending = verification.start("Bob.Stone@granite.com", profile)
+    code = last_outbox_code()
+    assert pending["email"] == "bob.stone@granite.com" and code not in json.dumps(pending)
+
+    assert verification.check(pending, code)[0] == "verified"
+    status, pending_after = verification.check(pending, "000000" if code != "000000" else "111111")
+    assert status == "wrong_code" and pending_after["attempts"] == 1
+    for _ in range(2):
+        status, pending_after = verification.check(pending_after, "999999" if code != "999999" else "888888")
+    assert status == "locked" and pending_after is None
+    expired = {**pending, "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()}
+    assert verification.check(expired, code)[0] == "expired"
+
+    # an email with no account gets a pending verification too, but no code is sent and none can match
+    before = len(outbox())
+    unknown = verification.start("nobody@example.com", None)
+    assert len(outbox()) == before and unknown["user_id"] is None
+    assert verification.check(unknown, code)[0] == "wrong_code"
+
+
+def outbox() -> list[dict]:
+    """Verification emails delivered to the (test) outbox."""
+    if not config.OUTBOX_PATH.exists():
+        return []
+    return [json.loads(line) for line in config.OUTBOX_PATH.read_text().splitlines()]
+
+
+def last_outbox_code() -> str:
+    return re.search(r"\b(\d{6})\b", outbox()[-1]["body"]).group(1)
 
 
 def test_unknown_id_error_lists_the_valid_ids():

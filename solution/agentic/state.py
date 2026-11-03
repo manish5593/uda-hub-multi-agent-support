@@ -95,7 +95,13 @@ class UdaHubState(TypedDict, total=False):
     prior_tickets: list[dict]
     ticket_history: list[dict]  # messages on the ticket before this session
 
+    # Kept across turns of the thread
+    verification: Optional[dict]  # pending one-time email code for a guest (hashed), see tools/verification.py
+    pending_confirmation: Optional[dict]  # account change waiting for the customer's yes on the next message
+
     # Per-turn decision data
+    verification_status: Optional[str]  # code_sent, wrong_code, expired, locked or verified
+    confirmable_action: Optional[dict]  # the change this message can confirm (last turn's pending_confirmation)
     classification: dict
     route: Route
     route_reason: str

@@ -225,11 +225,16 @@ def manage_subscription(user_id: str, action: str) -> dict:
 # LangChain tools bound to one customer + ticket
 # ---------------------------------------------------------------------------
 
-def build_account_tools(user_id: str, ticket_id: str) -> list[StructuredTool]:
+def build_account_tools(user_id: str, ticket_id: str, confirmed_action: Optional[dict] = None) -> list[StructuredTool]:
     """Return tools pre-bound to `user_id`, so the agent can only touch this account.
 
     The booking and cancellation tools only accept ids that a lookup tool returned earlier in
     this turn, so the agent can't act on an id it guessed.
+
+    Cancelling a reservation and changing the subscription need the customer's confirmation: the
+    first call only returns `needs_confirmation` with the exact action. The change runs only when
+    `confirmed_action` is that same action, which code sets after the customer replied yes; the
+    LLM can't confirm on the customer's behalf.
     """
     # ids returned by lookups this turn, with a label used to point the agent at the right id
     seen_reservation_ids: dict[str, str] = {}
@@ -241,6 +246,11 @@ def build_account_tools(user_id: str, ticket_id: str) -> list[StructuredTool]:
         valid = "; ".join(f"{i} ({label})" for i, label in seen.items())
         return {"success": False, "error": f"Unknown {kind} id '{given}'. Use the {kind}_id field from {lookup}, "
                 f"not a position or a name. Valid ids: {valid}"}
+
+    def _ask_to_confirm(action: dict, change: str) -> dict:
+        return {"success": False, "needs_confirmation": True, "action": action,
+                "error": f"Not done yet: this needs the customer's confirmation. Ask them to reply YES to {change}, "
+                         "and don't call this tool again until they have."}
 
     def get_my_account() -> dict:
         """Get the customer's profile: blocked status, subscription status, tier and remaining monthly quota."""
@@ -274,14 +284,20 @@ def build_account_tools(user_id: str, ticket_id: str) -> list[StructuredTool]:
         return result
 
     def cancel_my_reservation(reservation_id: str) -> dict:
-        """Cancel one of the customer's reservations. Only call after confirming which reservation the customer wants cancelled. The id must come from get_my_reservations."""
+        """Cancel one of the customer's reservations. The id must come from get_my_reservations. The first call asks the customer to confirm; after they reply yes, call it again with the same id."""
+        requested = {"tool": "cancel_my_reservation", "reservation_id": reservation_id}
+        if requested == confirmed_action:
+            return cancel_reservation(user_id, reservation_id)
         if reservation_id not in seen_reservation_ids:
             return _unknown_id("reservation", reservation_id, seen_reservation_ids, "get_my_reservations")
-        return cancel_reservation(user_id, reservation_id)
+        return _ask_to_confirm(requested, f"cancel {seen_reservation_ids[reservation_id]}")
 
     def change_subscription(action: Literal["pause", "resume", "cancel"]) -> dict:
-        """Pause, resume or cancel the customer's subscription. Only call when the customer explicitly asked for this action."""
-        return manage_subscription(user_id, action)
+        """Pause, resume or cancel the customer's subscription. Only call when the customer explicitly asked for this action. The first call asks the customer to confirm; after they reply yes, call it again with the same action."""
+        requested = {"tool": "change_subscription", "action": action}
+        if requested == confirmed_action:
+            return manage_subscription(user_id, action)
+        return _ask_to_confirm(requested, f"{action} their subscription")
 
     def request_refund(reason: str) -> dict:
         """Register a refund request for support-lead approval. This does NOT issue a refund; the ticket will be escalated. `reason` must describe the problem the customer reported, in their own terms."""

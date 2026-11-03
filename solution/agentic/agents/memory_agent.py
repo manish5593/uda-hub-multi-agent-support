@@ -87,7 +87,11 @@ def load_context(state: dict, config: RunnableConfig) -> dict:
         "ticket_history": history,
         "customer": customer,
         **recalled,
+        # A change can only be confirmed by the very next message, so last turn's request moves here
+        "confirmable_action": state.get("pending_confirmation"),
+        "pending_confirmation": None,
         # reset per-turn fields
+        "verification_status": None,
         "classification": {},
         "route": None,
         "route_reason": "",
@@ -113,7 +117,8 @@ def finalize(state: dict) -> dict:
 
     if state.get("escalation"):
         status = "escalated"
-    elif state.get("route") == "request_info" or state.get("assessment", {}).get("awaiting_customer"):
+    elif (state.get("route") == "request_info" or state.get("pending_confirmation")
+          or state.get("assessment", {}).get("awaiting_customer")):
         status = "awaiting_customer"
     else:
         status = "resolved"

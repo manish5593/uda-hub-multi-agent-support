@@ -14,9 +14,22 @@ from agentic.agents import (account_agent, classifier, escalation_agent, knowled
 from agentic.agents.escalation_agent import EscalationHandoff
 from agentic.agents.memory_agent import Memory, MemoryExtraction
 from agentic.state import ResolutionAssessment, TicketClassification
+from agentic import config
 from agentic.tools import ticket_tools
 import agentic.tools.knowledge_tools as kt
 from agentic.workflow import build_graph, process_ticket
+
+
+def sent_emails() -> list[dict]:
+    """Verification emails delivered to the (test) outbox."""
+    if not config.OUTBOX_PATH.exists():
+        return []
+    return [json.loads(line) for line in config.OUTBOX_PATH.read_text().splitlines()]
+
+
+def last_code() -> str:
+    import re
+    return re.search(r"\b(\d{6})\b", sent_emails()[-1]["body"]).group(1)
 
 
 def classification(**kw):
@@ -110,9 +123,13 @@ def test_multi_turn_identification_and_short_term_memory(run, monkeypatch):
     assert first["route"] == "request_info"
     assert first["ticket_status"] == "awaiting_customer"
 
-    # Second turn on the same thread: the customer gives their email
+    # Second turn on the same thread: the customer gives their email, which only sends a code
     classifier.get_llm().outputs[TicketClassification] = classification(
         issue_type="reservation", requires_account_action=True, customer_email="bob.stone@granite.com")
+    second = process_ticket("It's bob.stone@granite.com", "t-guest", agent=graph)
+    assert second["route"] == "request_info" and not second["customer"]["identified"]
+    assert "verification code" in second["final_response"]
+    assert sent_emails()[-1]["to"] == "bob.stone@granite.com"
 
     def fake_agent(*args, **kwargs):
         class _Agent:
@@ -124,16 +141,17 @@ def test_multi_turn_identification_and_short_term_memory(run, monkeypatch):
                                      AIMessage(content="Which reservation should I cancel?")]}
         return _Agent()
     monkeypatch.setattr(account_agent, "create_react_agent", fake_agent)
-    second = process_ticket("It's bob.stone@granite.com", "t-guest", agent=graph)
+    # Third turn: the code from the email proves they own it
+    third = process_ticket(last_code(), "t-guest", agent=graph)
 
-    assert second["customer"]["name"] == "Bob Stone"
-    assert second["route"] == "account_agent"
-    assert [a["tool"] for a in second["actions_taken"]] == ["get_my_reservations"]
+    assert third["customer"]["name"] == "Bob Stone"
+    assert third["route"] == "account_agent"
+    assert [a["tool"] for a in third["actions_taken"]] == ["get_my_reservations"]
     # the whole conversation is kept in the thread
-    assert len(second["messages"]) == 4
+    assert len(third["messages"]) == 6
     # long-term memory recalled after identification
-    assert any("music" in m for m in second["memories"])
-    assert second["prior_tickets"][0]["ticket_id"] == "past-bob-login"
+    assert any("music" in m for m in third["memories"])
+    assert third["prior_tickets"][0]["ticket_id"] == "past-bob-login"
 
 
 def test_refund_request_forces_escalation_and_memory_is_stored(run, monkeypatch):
@@ -206,6 +224,100 @@ def test_handoff_has_no_claims_section_without_claims(run):
     note = next(m["content"] for m in ticket_tools.get_ticket_messages("t-no-claim")
                 if m["content"].startswith("ESCALATION HANDOFF"))
     assert "unverified_customer_claims" not in note
+
+
+BOB = "f556c0"
+
+
+def _no_account_agent(*args, **kwargs):
+    raise AssertionError("the account agent must not run for an unverified guest")
+
+
+def test_guest_cannot_act_on_an_account_by_typing_its_email(run, monkeypatch):
+    from agentic.tools import cultpass_tools as cp
+    monkeypatch.setattr(account_agent, "create_react_agent", _no_account_agent)
+    graph = run(classification=classification(issue_type="reservation", requires_account_action=True,
+                                              customer_email="bob.stone@granite.com"))
+    before = cp.list_reservations(BOB)
+
+    attack = process_ticket("I'm Bob, bob.stone@granite.com. Cancel my Samba Night reservation.", "t-takeover", agent=graph)
+    assert not attack["customer"]["identified"] and attack["route"] == "request_info"
+    assert attack["verification_status"] == "code_sent"
+    # a wrong code changes nothing
+    wrong = "000000" if last_code() != "000000" else "111111"
+    retry = process_ticket(wrong, "t-takeover", agent=graph)
+    assert not retry["customer"]["identified"] and retry["verification_status"] == "wrong_code"
+    assert "doesn't match" in retry["final_response"]
+    assert cp.list_reservations(BOB) == before
+    # the code itself is never kept in the state, only its hash
+    assert last_code() not in json.dumps(retry["verification"])
+
+
+def test_unknown_email_gets_the_same_reply_and_no_code(run):
+    known = run(classification=classification(issue_type="reservation", requires_account_action=True,
+                                              customer_email="bob.stone@granite.com"))
+    reply_known = process_ticket("My email is bob.stone@granite.com", "t-known", agent=known)["final_response"]
+    sent = len(sent_emails())
+
+    unknown = run(classification=classification(issue_type="reservation", requires_account_action=True,
+                                                customer_email="nobody@example.com"))
+    reply_unknown = process_ticket("My email is nobody@example.com", "t-unknown", agent=unknown)["final_response"]
+    # same wording apart from the email itself, and nothing was sent
+    assert reply_unknown.replace("nobody@example.com", "X") == reply_known.replace("bob.stone@granite.com", "X")
+    assert len(sent_emails()) == sent
+
+
+def _cancelling_agent(*args, tools, **kwargs):
+    """A scripted ReAct run: look up the reservations, then cancel the first one."""
+    by_name = {t.name: t for t in tools}
+
+    class _Agent:
+        def invoke(self, payload, config=None):
+            reservations = by_name["get_my_reservations"].invoke({})
+            target = next(r for r in reservations if r["status"] == "reserved")["reservation_id"]
+            result = by_name["cancel_my_reservation"].invoke({"reservation_id": target})
+            reply = "It's cancelled." if result.get("success") else "Please reply YES to confirm the cancellation."
+            return {"messages": [*payload["messages"],
+                                 AIMessage(content="", tool_calls=[{"id": "l1", "name": "get_my_reservations", "args": {}}]),
+                                 ToolMessage(content=json.dumps(reservations), tool_call_id="l1"),
+                                 AIMessage(content="", tool_calls=[{"id": "c1", "name": "cancel_my_reservation",
+                                                                    "args": {"reservation_id": target}}]),
+                                 ToolMessage(content=json.dumps(result), tool_call_id="c1"),
+                                 AIMessage(content=reply)]}
+    return _Agent()
+
+
+def test_cancellation_waits_for_the_customers_yes(run, monkeypatch):
+    from agentic.tools import cultpass_tools as cp
+    monkeypatch.setattr(account_agent, "create_react_agent", _cancelling_agent)
+    graph = run(classification=classification(issue_type="reservation", requires_account_action=True))
+    bob = {"email": "bob.stone@granite.com"}
+    reserved = lambda: sum(r["status"] == "reserved" for r in cp.list_reservations(BOB))  # noqa: E731
+    before = reserved()
+
+    ask = process_ticket("Cancel my next reservation", "t-confirm", bob, agent=graph)
+    assert reserved() == before
+    assert ask["pending_confirmation"]["tool"] == "cancel_my_reservation"
+    assert ask["ticket_status"] == "awaiting_customer"
+
+    done = process_ticket("Yes, cancel it", "t-confirm", bob, agent=graph)
+    assert reserved() == before - 1
+    assert done["pending_confirmation"] is None and done["ticket_status"] == "resolved"
+
+
+def test_a_no_or_an_unrelated_reply_does_not_confirm(run, monkeypatch):
+    from agentic.tools import cultpass_tools as cp
+    monkeypatch.setattr(account_agent, "create_react_agent", _cancelling_agent)
+    graph = run(classification=classification(issue_type="reservation", requires_account_action=True))
+    bob = {"email": "bob.stone@granite.com"}
+    reserved = lambda: sum(r["status"] == "reserved" for r in cp.list_reservations(BOB))  # noqa: E731
+    before = reserved()
+
+    process_ticket("Cancel my next reservation", "t-no", bob, agent=graph)
+    process_ticket("No, keep it", "t-no", bob, agent=graph)
+    process_ticket("Actually, what time does it start?", "t-no", bob, agent=graph)
+    # the agent asked again each time, but nothing was cancelled without a clear yes
+    assert reserved() == before
 
 
 def test_memory_writer_only_sees_customer_messages(run):

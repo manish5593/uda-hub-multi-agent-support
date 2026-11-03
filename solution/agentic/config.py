@@ -29,3 +29,9 @@ MAX_MEMORIES = 10
 
 # Structured event log: one JSON object per agent decision (JSON Lines)
 EVENT_LOG_PATH = Path(os.getenv("UDAHUB_EVENT_LOG", STARTER_DIR / "logs" / "events.jsonl"))
+
+# A guest proves they own an email with a one-time code before any account action
+VERIFICATION_CODE_TTL_MINUTES = 10
+VERIFICATION_MAX_ATTEMPTS = 3
+# Stand-in for an email provider: each verification email is appended here (JSON Lines)
+OUTBOX_PATH = Path(os.getenv("UDAHUB_OUTBOX", STARTER_DIR / "logs" / "outbox.jsonl"))

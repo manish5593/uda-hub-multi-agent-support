@@ -46,7 +46,7 @@ Purple nodes use the LLM, gray nodes are plain code, red is the escalation to a 
 | Agent | What it does |
 |---|---|
 | **Classifier** | Gives the ticket a structured classification: issue type, urgency, sentiment, language, whether account action is needed, and confidence |
-| **Supervisor** | Identifies the customer (from metadata or an email in the conversation) and routes the ticket with deterministic rules. It escalates before any resolver runs when the customer asks for a human, the issue is legal or critical, the classifier isn't confident, a blocked customer has an account issue, or the customer reports a problem they reported before |
+| **Supervisor** | Identifies the customer (from metadata, or a guest who replies with a one-time code sent to the email they gave) and routes the ticket with deterministic rules. It escalates before any resolver runs when the customer asks for a human, the issue is legal or critical, the classifier isn't confident, a blocked customer has an account issue, or the customer reports a problem they reported before |
 | **Knowledge agent** | Answers how-to and policy questions with RAG over the 18 knowledge base articles |
 | **Account agent** | A ReAct agent with CultPass tools bound to the current customer: account, reservations, booking, cancellation, subscription changes and refund requests. Booking and cancellation only accept ids that a lookup returned in the same turn |
 | **Quality gate** | Scores the draft reply for confidence and checks that it is backed by the articles or tool results. It escalates on low confidence (< 0.7), an unsupported draft, or a policy that needs a human (such as a refund) |
@@ -79,6 +79,8 @@ The demos make real changes: bookings and cancellations, plus new tickets and me
 
 `03_agentic_app.ipynb` is committed with the outputs of a run against the real model (`gpt-4o-mini`, with
 `text-embedding-3-small` for retrieval), so you can read every decision trace and reply without running it.
+
+> **Note:** this run was recorded before email verification and change confirmation were added (3 Nov 2026). Today, scenario 3's guest also replies with a one-time code sent to their email before being identified, and scenario 2's cancellation waits for the customer to reply YES.
 
 | # | Ticket | What happened | Long-term memory |
 |---|---|---|---|
@@ -122,7 +124,8 @@ python -m pytest tests
   - RAG resolution
   - low-confidence escalation
   - a blocked customer
-  - multi-turn identification, recalling both short-term and long-term memory
+  - multi-turn identification with a one-time email code, recalling both short-term and long-term memory
+  - email verification (wrong codes, the same reply for unknown emails) and confirmation before cancelling
   - a refund request that forces escalation and writes a new memory
   - a reservation-state memory that is filtered out before it is stored
   - a memory writer that only sees the customer's messages

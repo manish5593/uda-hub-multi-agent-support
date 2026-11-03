@@ -14,7 +14,7 @@ sessions.
 | **Models** | `gpt-4o-mini` for every agent; `text-embedding-3-small` for retrieval |
 | **Data** | Two SQLite databases: `cultpass.db` (customers, subscriptions, experiences, reservations) and `udahub.db` (tickets, messages, 18 knowledge articles, long-term memory) |
 | **Demonstration** | `solution/03_agentic_app.ipynb`, committed with the outputs of a real-model run: 13 scenarios, 5 edge cases, and demos of routing, retrieval, tools, memory and logs |
-| **Tests** | 42 offline tests (22 unit, 20 end-to-end through the graph with a scripted fake LLM), no API key needed |
+| **Tests** | 49 offline tests (25 unit, 24 end-to-end through the graph with a scripted fake LLM), no API key needed |
 | **Environment** | Python 3.11, LangGraph 1.2.15, LangChain 1.4.6, langchain-openai 1.7.2, SQLAlchemy 2.1 |
 
 The main lesson matched what I'd learned building earlier agent systems: **the LLM proposes, code decides.**
@@ -31,7 +31,7 @@ One graph run handles one customer message:
 |---|---|---|
 | `load_context` | No | Finds or creates the ticket, identifies the customer, and recalls long-term memory: preferences and previous tickets |
 | `classifier` | Yes, structured output | Issue type (11 categories), urgency, sentiment, language, whether account action or a human is needed, confidence |
-| `supervisor` | No | Identifies a guest from an email in their message, then routes with plain-code rules |
+| `supervisor` | No | Identifies a guest once they reply with a one-time code sent to the email they gave, then routes with plain-code rules |
 | `knowledge_agent` | Yes | RAG over the knowledge base, answering only from the retrieved articles |
 | `account_agent` | Yes, ReAct agent | CultPass tools bound to the current customer |
 | `quality_gate` | Yes, structured output, plus rules | Checks the draft's grounding and confidence against the evidence, then decides in code whether to send it or escalate |
@@ -100,6 +100,8 @@ ticket for a human, and sends a fallback reply instead of crashing.
 
 Results from the committed run of notebook 03 against the real model:
 
+> **Note:** this run was recorded before email verification and change confirmation were added (3 Nov 2026). Today, scenario 3's guest also replies with a one-time code sent to their email before being identified, and scenario 2's cancellation waits for the customer to reply YES.
+
 | # | Ticket | Route | Outcome |
 |---|---|---|---|
 | 1 | Guest asks what a subscription includes | knowledge agent | Answered from the subscription and tiers articles |
@@ -164,6 +166,7 @@ reveal what the real model will do.
 - **No evaluation suite yet.** The next step is a labelled ticket set to measure routing accuracy and
   answer faithfulness over many runs, rather than inspecting individual runs.
 - **`create_react_agent` is deprecated** in LangGraph 1.x and should move to `langchain.agents.create_agent`.
+- **Code delivery is simulated.** Verification codes go to a local outbox file (`logs/outbox.jsonl`); production needs a real email provider. Identity from ticket metadata is still trusted as given, so it must come from the app's login session.
 - **Single platform.** Knowledge search already works per account, but the account tools are CultPass-specific.
 
 ## 8. Repository

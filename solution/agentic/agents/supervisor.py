@@ -6,10 +6,10 @@ business rules on top of that classification.
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agentic import config
-from agentic.agents.common import add_trace
+from agentic.agents.common import add_trace, last_user_message
 from agentic.agents.memory_agent import build_customer, recall
 from agentic.llm import get_llm
-from agentic.tools import cultpass_tools, ticket_tools
+from agentic.tools import cultpass_tools, ticket_tools, verification
 
 ACCOUNT_ISSUES = {"reservation", "subscription", "billing_refund"}
 BLOCKED_SENSITIVE_ISSUES = {"login_access", "reservation", "subscription", "billing_refund", "account_blocked", "complaint"}
@@ -63,7 +63,7 @@ def route_ticket(classification: dict, customer: dict, ticket_status: str,
         return "escalation_agent", "customer reports a blocked account"
     if c.get("issue_type") in REPEAT_ESCALATION_ISSUES and c.get("issue_type") in repeat_issues:
         return "escalation_agent", f"repeat {c.get('issue_type')} issue: the customer reported it before"
-    needs_account = c.get("requires_account_action") or c.get("issue_type") in ACCOUNT_ISSUES
+    needs_account = needs_account_access(c)
     if needs_account and not customer.get("identified"):
         return "request_info", "account action needed but customer is not identified"
     if needs_account:
@@ -71,23 +71,55 @@ def route_ticket(classification: dict, customer: dict, ticket_status: str,
     return "knowledge_agent", f"{c.get('issue_type')} can be answered from the knowledge base"
 
 
+def needs_account_access(classification: dict) -> bool:
+    return bool(classification.get("requires_account_action") or classification.get("issue_type") in ACCOUNT_ISSUES)
+
+
+def _verify_guest(state: dict) -> dict:
+    """Identify a guest only once they prove they own the email they gave, with a one-time code.
+
+    Returns the state updates: the pending verification, this turn's verification status and, once
+    verified, the customer and their long-term memory.
+    """
+    pending = state.get("verification")
+    email = (state.get("classification") or {}).get("customer_email")
+    code = verification.code_in(last_user_message(state))
+
+    if pending and code:
+        status, pending = verification.check(pending, code)
+        update = {"verification": pending, "verification_status": status}
+        if status == "verified":
+            previous = state["verification"]
+            ticket_tools.link_ticket_to_customer(state["ticket_id"], previous["user_id"], previous["user_name"])
+            customer = build_customer(ticket_tools.get_or_create_ticket(state["ticket_id"]))
+            update.update(customer=customer, **recall(customer, state["ticket_id"]))
+            customer_id = previous["user_id"]
+        else:
+            customer_id = None
+        update["trace"] = add_trace(state, f"[supervisor] verification code {status}", event="identify",
+                                    customer=customer_id, verification=status)
+        return update
+
+    # A new email (or the first one) for an account action: send a code, whether or not it has an account
+    if email and needs_account_access(state.get("classification") or {}) and (
+            not pending or pending["email"] != email.strip().lower()):
+        profile = cultpass_tools.find_customer_by_email(email)
+        return {"verification": verification.start(email, profile), "verification_status": "code_sent",
+                "trace": add_trace(state, "[supervisor] sent a verification code" if profile else
+                                   "[supervisor] no customer for that email: same reply, no code sent",
+                                   event="identify", customer=None, verification="code_sent")}
+    return {}
+
+
 def supervise(state: dict) -> dict:
     update = {}
     customer = state.get("customer") or {}
-    email = (state.get("classification") or {}).get("customer_email")
 
-    # Identify a guest customer from an email they gave in the conversation
-    if not customer.get("identified") and email:
-        profile = cultpass_tools.find_customer_by_email(email)
-        if profile:
-            ticket_tools.link_ticket_to_customer(state["ticket_id"], profile["user_id"], profile["name"])
-            ticket = ticket_tools.get_or_create_ticket(state["ticket_id"])
-            customer = build_customer(ticket)
-            update.update(customer=customer, **recall(customer, state["ticket_id"]))
-            state = {**state, "trace": add_trace(state, f"[supervisor] identified customer {profile['name']} via {email}",
-                                             event="identify", customer=profile["user_id"])}
-        else:
-            state = {**state, "trace": add_trace(state, f"[supervisor] no customer found for {email}", event="identify", customer=None)}
+    if not customer.get("identified"):
+        update = _verify_guest(state)
+        customer = update.get("customer", customer)
+        if "trace" in update:
+            state = {**state, "trace": update["trace"]}
 
     route, reason = route_ticket(state["classification"], customer, state.get("ticket_status", "open"),
                                  frozenset(repeat_issue_types({**state, **update})),
@@ -104,6 +136,18 @@ REQUEST_INFO_MESSAGE = (
 
 
 EMPTY_MESSAGE_REPLY = "Hi! It looks like your message came through empty. What can I help you with today?"
+
+# One fixed message per verification step. The first is the same whether or not the email has an
+# account, so the reply never reveals which emails are registered.
+VERIFICATION_MESSAGES = {
+    "code_sent": "Thanks! If {email} is registered with CultPass, we've just sent a 6-digit verification code "
+                 "to it. Please reply with the code so I can access your account.",
+    "wrong_code": "That code doesn't match. Please check the latest email from CultPass and reply with the "
+                  "6-digit code.",
+    "expired": "That code has expired. Please share your email address again and I'll send a new one.",
+    "locked": "That code didn't match too many times. Please share your email address again and I'll send "
+              "a new code.",
+}
 
 TRANSLATE_PROMPT = """Translate this customer support message into {language}.
 Keep the meaning, the friendly tone and any email address exactly as they are.
@@ -122,15 +166,19 @@ def _in_customer_language(message: str, language: str) -> str:
 def request_info(state: dict) -> dict:
     """Ask the customer for the information needed to continue (keeps the ticket open)."""
     classification = state.get("classification") or {}
-    email = classification.get("customer_email")
+    status = state.get("verification_status")
+    pending = state.get("verification")
     message = REQUEST_INFO_MESSAGE
+    asked = "to identify themselves"
     if classification.get("empty_message"):
-        message = EMPTY_MESSAGE_REPLY
-    if email:
-        message = (f"I couldn't find a CultPass account registered with {email}. Could you double-check "
-                   "the email address you use to log in to CultPass?")
+        message, asked = EMPTY_MESSAGE_REPLY, "what they need help with"
+    elif status in VERIFICATION_MESSAGES:
+        message = VERIFICATION_MESSAGES[status].format(email=(pending or {}).get("email", "that email"))
+        asked = "for their verification code" if pending else "to identify themselves"
+    elif pending:
+        # still waiting for the code from an earlier turn
+        message, asked = VERIFICATION_MESSAGES["code_sent"].format(email=pending["email"]), "for their verification code"
     language = classification.get("language", "English")
-    asked = "what they need help with" if classification.get("empty_message") else "to identify themselves"
     return {"final_response": _in_customer_language(message, language),
             "trace": add_trace(state, f"[request_info] asked customer {asked} ({language})",
                                event="request_info", asked=asked, language=language)}

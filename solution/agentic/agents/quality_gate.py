@@ -71,8 +71,10 @@ def should_escalate(state: dict) -> tuple[bool, str]:
         return True, a.get("reason", "human required")
     if not a.get("grounded", False):
         return True, "draft is not grounded in the knowledge base or account data"
-    # A necessary clarifying question is a valid reply even though nothing is answered yet
-    if not a.get("answered_by_evidence", False) and not a.get("awaiting_customer"):
+    # A necessary clarifying question, or asking to confirm a change, is a valid reply even though
+    # nothing is answered yet
+    waiting = a.get("awaiting_customer") or state.get("pending_confirmation")
+    if not a.get("answered_by_evidence", False) and not waiting:
         return True, "the knowledge base and account data don't answer this question"
     if a.get("confidence", 0) < config.RESOLUTION_MIN_CONFIDENCE:
         return True, f"resolution confidence {a.get('confidence', 0):.2f} below {config.RESOLUTION_MIN_CONFIDENCE}"

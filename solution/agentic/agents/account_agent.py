@@ -1,11 +1,12 @@
 """Account resolver: a ReAct agent that uses CultPass tools scoped to the current customer."""
 import json
+import re
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import create_react_agent
 
-from agentic.agents.common import add_trace, conversation, customer_context_block
+from agentic.agents.common import add_trace, conversation, customer_context_block, last_user_message
 from agentic.llm import get_llm
 from agentic.tools.cultpass_tools import build_account_tools
 from agentic.tools.knowledge_tools import build_knowledge_tool
@@ -25,6 +26,11 @@ Rules:
 - Look up policies with search_knowledge_base before explaining them (cancellation, refunds, quota...).
 - Only perform changes (book, cancel, change subscription) that the customer clearly asked for.
   If the request is ambiguous (e.g. which reservation), ask a short clarifying question instead.
+- Cancelling a reservation and changing the subscription need the customer's confirmation, and the tool
+  handles it: as soon as you know what they want changed, call the tool. Never ask for confirmation
+  yourself first; the confirmation only counts if the tool asked for it. When the tool returns
+  needs_confirmation, ask the customer to reply YES, naming exactly what will change, and stop.
+  When they reply yes, call the same tool again with the same arguments. Never say it's done before it is.
 - Refunds: never promise one. Use request_refund to register it for support-lead approval and tell
   the customer the billing team will review it.
 - If a tool returns an error, explain it plainly and offer the next best option.
@@ -34,6 +40,16 @@ Customer context:
 {context}
 
 Ticket summary: {summary}"""
+
+
+# A clear yes from the customer, with nothing that takes it back
+_YES = re.compile(r"^\W*(yes|yeah|yep|y|sure|ok|okay|confirm\w*|go ahead|please do|do it|sim|s[ií]|oui|ja)\b",
+                  re.IGNORECASE)
+_NO = re.compile(r"\b(no|not|don'?t|never|wait|stop)\b", re.IGNORECASE)
+
+
+def is_confirmation(text: str) -> bool:
+    return bool(_YES.search(text or "")) and not _NO.search(text or "")
 
 
 def _actions(messages: list) -> list[dict]:
@@ -55,7 +71,10 @@ def _actions(messages: list) -> list[dict]:
 def resolve_with_account_tools(state: dict) -> dict:
     customer = state["customer"]
     classification = state.get("classification", {})
-    tools = build_account_tools(customer["external_user_id"], state["ticket_id"])
+    # Code, not the LLM, decides whether the customer confirmed the change asked about last turn
+    confirmable = state.get("confirmable_action")
+    confirmed = confirmable if confirmable and is_confirmation(last_user_message(state)) else None
+    tools = build_account_tools(customer["external_user_id"], state["ticket_id"], confirmed_action=confirmed)
     tools.append(build_knowledge_tool(customer["account_id"]))
 
     agent = create_react_agent(
@@ -78,9 +97,13 @@ def resolve_with_account_tools(state: dict) -> dict:
                                error="recursion_limit"),
         }
     actions = _actions(result["messages"])
+    # The change now waiting for the customer's yes (only the next message can confirm it)
+    pending = next((a["result"]["action"] for a in reversed(actions)
+                    if isinstance(a["result"], dict) and a["result"].get("needs_confirmation")), None)
     return {
         "draft_response": result["messages"][-1].content,
         "actions_taken": actions,
+        "pending_confirmation": pending,
         "resolver": "account_agent",
         "trace": add_trace(state, f"[account_agent] tools used: {[a['tool'] for a in actions]}", event="tools",
                            tools=[{"tool": a["tool"], "args": a["args"],
