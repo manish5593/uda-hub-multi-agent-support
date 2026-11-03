@@ -1,10 +1,19 @@
 """Helpers shared by the agents: tracing and prompt-context formatting."""
 import json
+import re
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from agentic import config
 from agentic.event_log import log_event
+
+# Claims of a special status or permission. Only the system can grant these, so when a customer says
+# so it is an unverified claim, never a fact (a prompt-injection route into memory and handoff notes).
+PERMISSION_CLAIM = re.compile(
+    r"\b(pre-?approv\w*|authori[sz]ed|entitled|exempt\w*|waived?|guaranteed|vip|admin\w*|"
+    r"special\s+(access|permission|status|treatment))\b",
+    re.IGNORECASE,
+)
 
 
 def add_trace(state: dict, entry: str, event: str = "note", ticket_id=None, **fields) -> list[str]:

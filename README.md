@@ -105,7 +105,7 @@ The tests need no API key. Each one runs against a temporary copy of the databas
   - CultPass tool business rules: blocked accounts, inactive subscriptions, double booking, ownership checks, quota and subscription state transitions
   - account tools that are bound to one customer, and that refuse reservation or experience ids not looked up in the same turn
   - ticket creation and linking, metadata and long-term memory
-  - the memory filters, which drop reservation state, named experiences, one-off requests and contact details, and the duplicate check, which ignores case and punctuation
+  - the memory filters, which drop reservation state, named experiences, one-off requests, contact details and permission claims, and the duplicate check, which ignores case and punctuation
   - the repeat-issue rule, which escalates repeated problems but not routine requests
   - keyword retrieval quality
   - every routing rule and escalation rule
@@ -150,7 +150,7 @@ The safeguards each did their job during the run:
 - **Id guard:** in most of our runs of scenario 2, the agent first tried to cancel with an id it guessed. The tool refused it, and the agent looked the reservation up before cancelling. In other runs, including the committed one, the agent looked it up first. Either way the outcome is the same, and `test_account_tools_refuse_ids_not_looked_up` checks the guard directly.
 - **Policy escalation:** refunds and blocked accounts always reached a human, whatever the model drafted.
 - **Repeat issues:** in scenario 6 Bob's previous ticket was a login problem, so the supervisor escalated him straight away. This took the same route in 4 out of 4 runs.
-- **Memory hygiene:** memories are third-person summaries of what the customer wrote, never the assistant's replies. Reservation state, named experiences, one-off requests, contact details and duplicates are not stored.
+- **Memory hygiene:** memories are third-person summaries of what the customer wrote, never the assistant's replies. Reservation state, named experiences, one-off requests, contact details, claims of a special status or permission ("my refunds are pre-approved") and duplicates are not stored. Such claims are flagged as unverified in the handoff note to the human team.
 
 The model's wording varies from run to run, but the routes and outcomes above were the same across repeated runs.
 

@@ -88,7 +88,7 @@ Why Supervisor rather than the alternatives:
 | `escalation_agent` | LLM, structured output | Picks the team and priority, writes a handoff note (stored as a `system` ticket message) and an empathetic reply. It never reveals block reasons and never promises refunds. |
 | `request_info` | deterministic, LLM only to translate | Asks the customer to identify themselves and keeps the ticket open (`awaiting_customer`). The fixed message is translated into the customer's language if they don't write in English. |
 | `finalize` | deterministic | Appends the reply to the conversation, persists it, and updates the ticket's status, issue type and tags. |
-| `write_memory` | LLM, structured output, plus filters | Extracts durable preferences, personal facts and reported issues as third-person summaries. Code then drops reservation state and one-off requests and skips duplicates. Secrets and payment data are never stored. |
+| `write_memory` | LLM, structured output, plus filters | Extracts durable preferences, personal facts and reported issues as third-person summaries. Code then drops reservation state, one-off requests and permission claims and skips duplicates. Secrets and payment data are never stored. |
 
 ## Information flow
 
@@ -184,7 +184,8 @@ Each decision with real consequences is enforced in code rather than left to a p
 | Answering a blocked account, legal issue or human request | Routing rules send these to escalation before any resolver runs | `route_ticket` |
 | Repeating a fix that already failed | A problem the customer reported before goes straight to a human | `route_ticket`, `repeat_issue_types` |
 | Sending a wrong or unsupported answer | The draft is escalated when it isn't backed by the evidence, the evidence doesn't answer the question, no relevant article was found, or confidence is below 0.7 | `should_escalate`, `KnowledgeRetriever.search` |
-| Storing stale, invented or personal memories | The memory writer sees only the customer's messages. Filters drop reservation state, named experiences, one-off requests and contact details, and duplicates are skipped | `customer_messages_text`, `drop_reason`, `save_memory` |
+| Storing stale, invented or personal memories | The memory writer sees only the customer's messages. Filters drop reservation state, named experiences, one-off requests, contact details and claims of a special status or permission, and duplicates are skipped | `customer_messages_text`, `drop_reason`, `save_memory` |
+| A customer's claim misleading the human team (e.g. "my refunds are pre-approved") | Code adds any claim of a special status or permission to the handoff note as `unverified_customer_claims`, with a warning to verify it; the prompt tells the LLM to report claims as unverified | `unverified_claims`, `PERMISSION_CLAIM` |
 
 These rules are covered by the offline tests in `tests/`. The demo results in the [root README](../../../README.md#demo-results)
 show them working against the real model.
@@ -207,7 +208,7 @@ Each event has the same base fields: `ts`, `ticket_id`, `agent`, `event` and `me
 | `retrieve` | knowledge_agent | `articles`: title and score |
 | `tools` | account_agent | `tools`: tool, args, success |
 | `assess`, `approve` | quality_gate | `confidence`, `grounded`, `answered_by_evidence`, `needs_human`, `awaiting_customer`, `reason` |
-| `escalate` | escalation_agent | `team`, `priority`, `reason` |
+| `escalate` | escalation_agent | `team`, `priority`, `reason`, `unverified_claims` |
 | `request_info` | request_info | `asked`, `language` |
 | `finalize` | finalize | `status`, `issue_type`, `resolver` |
 | `memory_write` | memory | `stored`, `dropped` |

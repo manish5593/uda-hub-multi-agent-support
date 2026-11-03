@@ -51,7 +51,7 @@ Purple nodes use the LLM, gray nodes are plain code, red is the escalation to a 
 | **Account agent** | A ReAct agent with CultPass tools bound to the current customer: account, reservations, booking, cancellation, subscription changes and refund requests. Booking and cancellation only accept ids that a lookup returned in the same turn |
 | **Quality gate** | Scores the draft reply for confidence and checks that it is backed by the articles or tool results. It escalates on low confidence (< 0.7), an unsupported draft, or a policy that needs a human (such as a refund) |
 | **Escalation agent** | Picks the human team and priority, saves a handoff note on the ticket, and replies to the customer |
-| **Memory** | Short-term: the conversation per ticket thread (`MemorySaver`). Long-term: customer preferences and reported issues (`customer_memory` table) and previous tickets in `udahub.db`. The memory writer only sees the customer's own messages. Reservation state, named experiences, one-off requests, contact details and duplicates are filtered out |
+| **Memory** | Short-term: the conversation per ticket thread (`MemorySaver`). Long-term: customer preferences and reported issues (`customer_memory` table) and previous tickets in `udahub.db`. The memory writer only sees the customer's own messages. Reservation state, named experiences, one-off requests, contact details, permission claims and duplicates are filtered out |
 
 ## Running it
 
@@ -114,7 +114,7 @@ python -m pytest tests
   - the tool business rules: blocked accounts, inactive subscriptions, double booking, ownership, quota and subscription transitions
   - account tools bound to one customer, which refuse ids that weren't looked up in the same turn
   - ticket and memory persistence
-  - the memory filters (reservation state, named experiences, one-off requests, contact details) and the duplicate check
+  - the memory filters (reservation state, named experiences, one-off requests, contact details, permission claims) and the duplicate check
   - the repeat-issue rule, which escalates repeated problems but not routine requests
   - keyword retrieval
   - every routing and escalation rule
