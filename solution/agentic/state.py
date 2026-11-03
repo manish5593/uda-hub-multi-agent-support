@@ -100,7 +100,7 @@ class UdaHubState(TypedDict, total=False):
     pending_confirmation: Optional[dict]  # account change waiting for the customer's yes on the next message
 
     # Per-turn decision data
-    verification_status: Optional[str]  # code_sent, wrong_code, expired, locked or verified
+    verification_status: Optional[str]  # code_sent, wrong_code, expired, locked, too_many_codes or verified
     confirmable_action: Optional[dict]  # the change this message can confirm (last turn's pending_confirmation)
     classification: dict
     route: Route

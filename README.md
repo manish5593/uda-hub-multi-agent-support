@@ -39,7 +39,8 @@ solution/
 │   ├── agents/                  # classifier, supervisor, resolvers, quality gate, escalation, memory
 │   ├── tools/                   # CultPass tools, RAG retriever, ticket and memory storage
 │   ├── design/                  # architecture diagram, Mermaid graph and design document
-│   ├── config.py                # models, paths and thresholds
+│   ├── rate_limits.py           # message, verification-code and daily token limits
+│   ├── config.py                # models, paths, thresholds and limits
 │   └── state.py                 # graph state and structured-output schemas
 ├── data/                        # SQLAlchemy models, JSONL seed data and the SQLite databases
 └── tests/                       # offline unit and end-to-end tests
@@ -153,6 +154,7 @@ The safeguards each did their job during the run:
 - **Policy escalation:** refunds and blocked accounts always reached a human, whatever the model drafted.
 - **Repeat issues:** in scenario 6 Bob's previous ticket was a login problem, so the supervisor escalated him straight away. This took the same route in 4 out of 4 runs.
 - **Identity and confirmation (added after this run):** typing an email doesn't identify a guest. They get a one-time code by email and are identified only after replying with it, and the reply is the same whether or not the email has an account. Cancelling a reservation or changing the subscription waits for the customer's YES, checked in code.
+- **Rate and cost limits (added after this run):** more than 6 messages a minute from one ticket, customer or IP get a "please slow down" reply without any LLM call. Each email gets at most 3 verification codes an hour. Once the daily token budget is used up, new messages go to a human.
 - **Memory hygiene:** memories are third-person summaries of what the customer wrote, never the assistant's replies. Reservation state, named experiences, one-off requests, contact details, claims of a special status or permission ("my refunds are pre-approved") and duplicates are not stored. Such claims are flagged as unverified in the handoff note to the human team.
 
 The model's wording varies from run to run, but the routes and outcomes above were the same across repeated runs.

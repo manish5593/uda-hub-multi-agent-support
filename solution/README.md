@@ -119,6 +119,7 @@ python -m pytest tests
   - the memory filters (reservation state, named experiences, one-off requests, contact details, permission claims) and the duplicate check
   - the repeat-issue rule, which escalates repeated problems but not routine requests
   - keyword retrieval
+  - rate limits per ticket, customer and IP, the daily token budget, the token counter, and hashed limit keys
   - every routing and escalation rule
 - `tests/test_workflow.py` runs the whole graph end to end through these paths:
   - RAG resolution
@@ -131,6 +132,7 @@ python -m pytest tests
   - a memory writer that only sees the customer's messages
   - repeat issues, from a previous ticket and from the same ticket, that go straight to a human
   - a structured, searchable event for every decision and tool call
+  - a flood of messages refused without an LLM call, a used-up token budget handed to a human, and a limit on verification codes per email that looks the same for unknown emails
   - an LLM outage or unknown account that gets a fallback reply instead of a crash, and an empty message
 
 ## Folder guide

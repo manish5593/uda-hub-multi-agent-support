@@ -14,7 +14,7 @@ sessions.
 | **Models** | `gpt-4o-mini` for every agent; `text-embedding-3-small` for retrieval |
 | **Data** | Two SQLite databases: `cultpass.db` (customers, subscriptions, experiences, reservations) and `udahub.db` (tickets, messages, 18 knowledge articles, long-term memory) |
 | **Demonstration** | `solution/03_agentic_app.ipynb`, committed with the outputs of a real-model run: 13 scenarios, 5 edge cases, and demos of routing, retrieval, tools, memory and logs |
-| **Tests** | 49 offline tests (25 unit, 24 end-to-end through the graph with a scripted fake LLM), no API key needed |
+| **Tests** | 56 offline tests (29 unit, 27 end-to-end through the graph with a scripted fake LLM), no API key needed |
 | **Environment** | Python 3.11, LangGraph 1.2.15, LangChain 1.4.6, langchain-openai 1.7.2, SQLAlchemy 2.1 |
 
 The main lesson matched what I'd learned building earlier agent systems: **the LLM proposes, code decides.**
@@ -167,6 +167,7 @@ reveal what the real model will do.
   answer faithfulness over many runs, rather than inspecting individual runs.
 - **`create_react_agent` is deprecated** in LangGraph 1.x and should move to `langchain.agents.create_agent`.
 - **Code delivery is simulated.** Verification codes go to a local outbox file (`logs/outbox.jsonl`); production needs a real email provider. Identity from ticket metadata is still trusted as given, so it must come from the app's login session.
+- **Rate limits need the sender's IP from the app.** Messages are limited per ticket, customer and `client_ip`, but without a `client_ip` a sender who opens a new ticket for every message is only stopped by the daily token budget.
 - **Single platform.** Knowledge search already works per account, but the account tools are CultPass-specific.
 
 ## 8. Repository

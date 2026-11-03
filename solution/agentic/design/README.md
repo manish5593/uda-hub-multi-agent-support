@@ -180,6 +180,9 @@ Each decision with real consequences is enforced in code rather than left to a p
 | A guest posing as a customer by typing their email | The guest is identified only after replying with a one-time code sent to that email (hashed in the state, 10 minutes, 3 attempts) | `_verify_guest`, `tools/verification.py` |
 | Finding out which emails have an account | The reply is the same for known and unknown emails, and no code is sent to an unknown one | `VERIFICATION_MESSAGES`, `verification.start` |
 | Cancelling or changing the subscription without the customer's say-so | The tool first returns `needs_confirmation`; the change runs only if the customer's next message is a clear yes, checked in code | `build_account_tools`, `is_confirmation` |
+| A flood of messages (spam or a runaway script) running up the LLM bill | More than 6 messages a minute from one ticket, customer or client IP get a fixed "please slow down" reply before any LLM call | `rate_limits.check_message`, `process_ticket` |
+| Guessing verification codes by asking for new ones | At most 3 codes per email per hour, counted the same for registered and unknown emails | `rate_limits.can_send_code`, `_verify_guest` |
+| Runaway token spend | Every LLM call's tokens are counted; once the 24-hour budget is used up, new messages are saved and handed to a human without calling the LLM | `TokenCounter`, `DAILY_TOKEN_BUDGET` |
 | Acting on a guessed id | Booking and cancellation refuse ids that no lookup returned in the same turn | `build_account_tools` |
 | Breaking business rules | Blocked accounts, subscription status, tier, slots, quota and double booking are checked before every change | `reserve_experience`, `manage_subscription` |
 | A tool failure crashing the run | Unexpected tool errors are caught and returned to the agent as a structured error | `_safe` in `cultpass_tools.py` |
@@ -189,6 +192,10 @@ Each decision with real consequences is enforced in code rather than left to a p
 | Sending a wrong or unsupported answer | The draft is escalated when it isn't backed by the evidence, the evidence doesn't answer the question, no relevant article was found, or confidence is below 0.7 | `should_escalate`, `KnowledgeRetriever.search` |
 | Storing stale, invented or personal memories | The memory writer sees only the customer's messages. Filters drop reservation state, named experiences, one-off requests, contact details and claims of a special status or permission, and duplicates are skipped | `customer_messages_text`, `drop_reason`, `save_memory` |
 | A customer's claim misleading the human team (e.g. "my refunds are pre-approved") | Code adds any claim of a special status or permission to the handoff note as `unverified_customer_claims`, with a warning to verify it; the prompt tells the LLM to report claims as unverified | `unverified_claims`, `PERMISSION_CLAIM` |
+
+The limits are counted in udahub.db's `rate_limit_events` table, so they hold across restarts. Its keys are
+hashed, so no email or IP address is stored there, and the table is created on first use. They can be changed
+in `config.py` or with `UDAHUB_RATE_LIMIT_MESSAGES`, `UDAHUB_RATE_LIMIT_WINDOW_SECONDS` and `UDAHUB_DAILY_TOKEN_BUDGET`.
 
 These rules are covered by the offline tests in `tests/`. The demo results in the [root README](../../../README.md#demo-results)
 show them working against the real model.
@@ -216,6 +223,7 @@ Each event has the same base fields: `ts`, `ticket_id`, `agent`, `event` and `me
 | `finalize` | finalize | `status`, `issue_type`, `resolver` |
 | `memory_write` | memory | `stored`, `dropped` |
 | `error` | workflow | `error_type`, `error`, `traceback` |
+| `rate_limited` | workflow | `limit` (`too_many_messages` or `token_budget`), `reason` |
 
 `agentic.event_log.search_events()` filters by any field. List fields match on any item, so
 `search_events(tools="request_refund")` finds every refund request. `text` searches the message and `since`
@@ -247,6 +255,7 @@ state = process_ticket(
 | `metadata.channel` | No | `chat`, `email`, and so on; defaults to `chat` |
 | `metadata.urgency` | No | The urgency reported by the source system: `low`, `medium`, `high` or `critical`. The classifier sees it, and routing uses the more severe of it and the classifier's urgency, so a ticket reported as `critical` always reaches a human. |
 | `metadata.tags` | No | Initial ticket tags |
+| `metadata.client_ip` | No | The sender's IP address, set by the app server. Rate limits count it, so a sender can't get around them by opening new tickets. |
 
 `orchestrator` also works with the course-provided `utils.chat_interface(orchestrator, ticket_id)`, which sends
 messages only.

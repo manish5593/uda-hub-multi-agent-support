@@ -12,6 +12,7 @@ the models in `data/models/udahub.py`.
 | `ticket_messages` | Full message log: `user`, `ai` and `system` messages, including escalation handoff notes and refund requests |
 | `knowledge` | Knowledge base articles per account (18 for CultPass), used for RAG |
 | `customer_memory` | Long-term memory: preferences, personal facts and reported issues, recalled in every new ticket for that customer |
+| `rate_limit_events` | One row per counted message, verification code or batch of LLM tokens, for the rate and cost limits. Keys are hashed, rows older than 2 days are pruned, and the table is created on first use, so the committed database doesn't have it yet |
 
 ## What's in the committed database
 

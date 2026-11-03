@@ -5,6 +5,7 @@ from sqlalchemy import (
     Text,
     DateTime,
     Enum,
+    Integer,
     ForeignKey,
     UniqueConstraint
 )
@@ -138,3 +139,16 @@ class CustomerMemory(Base):
 
     def __repr__(self):
         return f"<CustomerMemory(user_id='{self.user_id}', category='{self.category}', content='{self.content[:30]}')>"
+
+
+class RateLimitEvent(Base):
+    """One counted event (a message, a verification code or LLM tokens) for the rate and cost limits.
+    The key is a hash, so emails and IP addresses are not stored in plain text."""
+    __tablename__ = 'rate_limit_events'
+    event_id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String, nullable=False, index=True)
+    amount = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<RateLimitEvent(key='{self.key[:8]}', amount={self.amount}, created_at='{self.created_at}')>"

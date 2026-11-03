@@ -2,7 +2,7 @@
 import json
 import re
 
-from agentic import config
+from agentic import config, rate_limits
 from agentic.agents.quality_gate import should_escalate
 from agentic.agents.supervisor import route_ticket
 from agentic.tools import cultpass_tools as cp
@@ -313,6 +313,52 @@ def test_verification_codes_are_hashed_expire_and_lock():
     unknown = verification.start("nobody@example.com", None)
     assert len(outbox()) == before and unknown["user_id"] is None
     assert verification.check(unknown, code)[0] == "wrong_code"
+
+
+def test_messages_are_limited_per_ticket_customer_and_ip(monkeypatch):
+    monkeypatch.setattr(config, "RATE_LIMIT_MESSAGES", 2)
+    alice = {"email": "alice@example.com", "client_ip": "10.0.0.1"}
+    assert rate_limits.check_message("t-1", alice) is None
+    assert rate_limits.check_message("t-1", alice) is None
+    limit, reason = rate_limits.check_message("t-1", alice)
+    assert limit == "too_many_messages" and "ticket" in reason
+    # a new ticket doesn't get around it: the same sender is still over the limit
+    assert rate_limits.check_message("t-2", {"client_ip": "10.0.0.1"})[0] == "too_many_messages"
+    assert rate_limits.check_message("t-3", {"email": "ALICE@example.com"})[0] == "too_many_messages"
+    # someone else is not affected
+    assert rate_limits.check_message("t-4", {"client_ip": "10.0.0.2"}) is None
+    # once the window has passed, the sender can write again
+    monkeypatch.setattr(config, "RATE_LIMIT_WINDOW_SECONDS", 0)
+    assert rate_limits.check_message("t-1", alice) is None
+
+
+def test_daily_token_budget(monkeypatch):
+    monkeypatch.setattr(config, "DAILY_TOKEN_BUDGET", 1000)
+    rate_limits.record_tokens(900)
+    assert rate_limits.check_message("t-1") is None
+    rate_limits.record_tokens(100)
+    assert rate_limits.check_message("t-2")[0] == "token_budget"
+
+
+def test_token_counter_records_the_tokens_of_each_llm_call():
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, LLMResult
+    usage = {"input_tokens": 700, "output_tokens": 50, "total_tokens": 750}
+    rate_limits.TokenCounter().on_llm_end(
+        LLMResult(generations=[[ChatGeneration(message=AIMessage(content="hi", usage_metadata=usage))]]))
+    assert rate_limits.tokens_used_today() == 750
+    # a result without usage counts nothing, and never raises
+    rate_limits.TokenCounter().on_llm_end(LLMResult(generations=[[]]))
+    assert rate_limits.tokens_used_today() == 750
+
+
+def test_rate_limit_keys_hide_emails_and_ips():
+    import sqlite3
+    rate_limits.check_message("t-1", {"email": "alice@example.com", "client_ip": "10.0.0.1"})
+    rate_limits.record_code("alice@example.com")
+    dump = "\n".join(sqlite3.connect(config.UDAHUB_DB_PATH).iterdump())
+    assert "rate_limit_events" in dump
+    assert "alice@example.com" not in dump and "10.0.0.1" not in dump
 
 
 def outbox() -> list[dict]:

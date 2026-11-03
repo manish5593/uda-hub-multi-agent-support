@@ -14,10 +14,11 @@ from agentic.agents import (account_agent, classifier, escalation_agent, knowled
 from agentic.agents.escalation_agent import EscalationHandoff
 from agentic.agents.memory_agent import Memory, MemoryExtraction
 from agentic.state import ResolutionAssessment, TicketClassification
-from agentic import config
+from agentic import config, rate_limits
+from agentic.event_log import search_events
 from agentic.tools import ticket_tools
 import agentic.tools.knowledge_tools as kt
-from agentic.workflow import build_graph, process_ticket
+from agentic.workflow import BUSY_REPLY, SLOW_DOWN_REPLY, build_graph, process_ticket
 
 
 def sent_emails() -> list[dict]:
@@ -464,3 +465,46 @@ def test_empty_message_asks_what_the_customer_needs_without_the_llm(run):
     state = process_ticket("   ", "t-empty", agent=graph)
     assert state["route"] == "request_info" and state["final_response"] == EMPTY_MESSAGE_REPLY
     assert TicketClassification not in classifier.get_llm().prompts  # no classification call made
+
+
+def test_a_flood_of_messages_is_refused_without_calling_the_llm(run, monkeypatch):
+    monkeypatch.setattr(config, "RATE_LIMIT_MESSAGES", 2)
+    graph = run(classification=classification(issue_type="login_access"))
+    for _ in range(2):  # (the second is escalated as a repeat issue, but it is handled)
+        assert process_ticket("I forgot my password", "t-flood", agent=graph)["route"] is not None
+
+    saved = len(ticket_tools.get_ticket_messages("t-flood"))
+    monkeypatch.setattr(classifier, "get_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM called")))
+    state = process_ticket("I forgot my password", "t-flood", agent=graph)
+    assert state["ticket_status"] == "rate_limited" and state["final_response"] == SLOW_DOWN_REPLY
+    assert len(ticket_tools.get_ticket_messages("t-flood")) == saved  # the refused message isn't saved
+    assert search_events(ticket_id="t-flood", event="rate_limited")[0]["limit"] == "too_many_messages"
+
+
+def test_when_the_token_budget_is_used_up_a_human_takes_over(run, monkeypatch):
+    monkeypatch.setattr(config, "DAILY_TOKEN_BUDGET", 1000)
+    rate_limits.record_tokens(1000)
+    graph = run(classification=classification(issue_type="login_access"))
+    monkeypatch.setattr(classifier, "get_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM called")))
+
+    state = process_ticket("I forgot my password", "t-budget", agent=graph)
+    assert state["ticket_status"] == "escalated" and state["final_response"] == BUSY_REPLY
+    messages = ticket_tools.get_ticket_messages("t-budget")
+    assert messages[0] == {**messages[0], "role": "user", "content": "I forgot my password"}
+    ticket = ticket_tools.get_or_create_ticket("t-budget")
+    assert ticket["status"] == "escalated" and ticket["tags"] == "token_budget"
+
+
+def test_verification_codes_per_email_are_limited(run, monkeypatch):
+    monkeypatch.setattr(config, "VERIFICATION_CODES_PER_EMAIL_PER_HOUR", 2)
+    replies = {}
+    for email in ("bob.stone@granite.com", "nobody@example.com"):
+        graph = run(classification=classification(issue_type="reservation", requires_account_action=True,
+                                                  customer_email=email))
+        # a new ticket each time, as an attacker would do to get fresh guesses
+        states = [process_ticket(f"My email is {email}", f"t-{email}-{i}", agent=graph) for i in range(3)]
+        assert [s["verification_status"] for s in states] == ["code_sent", "code_sent", "too_many_codes"]
+        replies[email] = states[-1]["final_response"]
+    assert len(sent_emails()) == 2  # only Bob's first two; none to the unknown email
+    # the limit looks the same for registered and unknown emails
+    assert replies["bob.stone@granite.com"] == replies["nobody@example.com"]

@@ -23,6 +23,7 @@ from agentic.agents.knowledge_agent import resolve_with_knowledge
 from agentic.agents.memory_agent import finalize, load_context, write_memory
 from agentic.agents.quality_gate import approve, assess_resolution, should_escalate
 from agentic.agents.supervisor import request_info, supervise
+from agentic import rate_limits
 from agentic.event_log import log_event
 from agentic.state import UdaHubState
 from agentic.tools import ticket_tools
@@ -31,6 +32,10 @@ logger = logging.getLogger("udahub")
 
 FALLBACK_REPLY = ("Sorry, something went wrong on our side while handling your message. "
                   "A member of our support team will follow up with you by email.")
+SLOW_DOWN_REPLY = ("You're sending messages faster than we can answer them. "
+                   "Please wait a minute, then send your message again.")
+BUSY_REPLY = ("Our assistant is very busy right now, so a member of our support team will pick up your "
+              "message and follow up with you by email.")
 
 
 def _after_supervisor(state: UdaHubState) -> str:
@@ -90,9 +95,36 @@ def process_ticket(text: str, ticket_id: str, metadata: Optional[dict] = None, a
     if metadata:
         payload["metadata"] = metadata
     try:
+        # Checked before the graph runs, so a refused message costs no LLM call
+        limited = rate_limits.check_message(ticket_id, metadata)
+        if limited:
+            return _refuse(ticket_id, text, metadata, *limited)
         return agent.invoke(payload, config={"configurable": {"thread_id": ticket_id}})
     except Exception as exc:
         return _handle_failure(ticket_id, exc)
+
+
+def _refuse(ticket_id: str, text: str, metadata: Optional[dict], limit: str, reason: str) -> dict:
+    """Answer a message that is over a rate or cost limit without running the agents.
+
+    Too many messages: ask the sender to slow down (nothing is saved). Token budget used up: the
+    customer still deserves an answer, so the message is saved and the ticket handed to a human.
+    """
+    entry = f"[workflow] refused ({limit}): {reason}"
+    log_event(ticket_id, "workflow", "rate_limited", entry, limit=limit, reason=reason)
+    if limit == "too_many_messages":
+        return {"ticket_id": ticket_id, "route": None, "ticket_status": "rate_limited",
+                "final_response": SLOW_DOWN_REPLY, "trace": [entry]}
+    try:
+        ticket_tools.get_or_create_ticket(ticket_id, metadata)
+        ticket_tools.add_message(ticket_id, "user", text)
+        ticket_tools.add_message(ticket_id, "system", f"Not handled automatically: {reason}; needs a human.")
+        ticket_tools.add_message(ticket_id, "ai", BUSY_REPLY)
+        ticket_tools.update_ticket_metadata(ticket_id, status="escalated", tags="token_budget")
+    except Exception:
+        logger.exception("Could not hand ticket %s to a human after the token budget ran out", ticket_id)
+    return {"ticket_id": ticket_id, "route": None, "ticket_status": "escalated", "final_response": BUSY_REPLY,
+            "trace": [entry]}
 
 
 def _handle_failure(ticket_id: str, exc: Exception) -> dict:

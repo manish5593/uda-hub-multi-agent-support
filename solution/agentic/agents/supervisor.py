@@ -5,7 +5,7 @@ business rules on top of that classification.
 """
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agentic import config
+from agentic import config, rate_limits
 from agentic.agents.common import add_trace, last_user_message
 from agentic.agents.memory_agent import build_customer, recall
 from agentic.llm import get_llm
@@ -103,6 +103,12 @@ def _verify_guest(state: dict) -> dict:
     # A new email (or the first one) for an account action: send a code, whether or not it has an account
     if email and needs_account_access(state.get("classification") or {}) and (
             not pending or pending["email"] != email.strip().lower()):
+        # Counted for every email, registered or not, so the limit doesn't reveal which ones exist
+        if not rate_limits.can_send_code(email):
+            return {"verification_status": "too_many_codes",
+                    "trace": add_trace(state, "[supervisor] too many verification codes for that email: none sent",
+                                       event="identify", customer=None, verification="too_many_codes")}
+        rate_limits.record_code(email)
         profile = cultpass_tools.find_customer_by_email(email)
         return {"verification": verification.start(email, profile), "verification_status": "code_sent",
                 "trace": add_trace(state, "[supervisor] sent a verification code" if profile else
@@ -147,6 +153,8 @@ VERIFICATION_MESSAGES = {
     "expired": "That code has expired. Please share your email address again and I'll send a new one.",
     "locked": "That code didn't match too many times. Please share your email address again and I'll send "
               "a new code.",
+    "too_many_codes": "We've sent several verification codes to that email recently. For your security, please "
+                      "reply with the latest code you received, or wait an hour and ask for a new one.",
 }
 
 TRANSLATE_PROMPT = """Translate this customer support message into {language}.
