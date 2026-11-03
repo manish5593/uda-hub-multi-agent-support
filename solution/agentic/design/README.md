@@ -25,8 +25,8 @@ graph TD
     CL --> SU{supervisor<br/>identify customer +<br/>rule-based routing}
     SU -->|how-to / policy| KA[knowledge_agent<br/>RAG over KB]
     SU -->|needs account data/action| AA[account_agent<br/>ReAct + CultPass tools]
-    SU -->|guest needs account action| RI[request_info<br/>ask for email]
-    SU -->|human requested / critical / blocked /<br/>repeat issue / low confidence| EA[escalation_agent<br/>handoff note]
+    SU -->|guest needs account action| RI[request_info<br/>ask for email<br/>LLM only to translate]
+    SU -->|human requested / critical / blocked /<br/>repeat issue / low confidence| EA[escalation_agent<br/>LLM: handoff note + reply]
     KA --> QG{quality_gate<br/>confidence & grounding}
     AA --> QG
     QG -->|approved| AP[approve]
@@ -86,7 +86,7 @@ Why Supervisor rather than the alternatives:
 | `quality_gate` | LLM, structured output, plus rules | Scores the draft against the evidence (articles or tool results) for confidence, grounding, whether a human is needed and whether it waits on the customer. `should_escalate` then decides deterministically. |
 | `approve` | deterministic | Runs when the quality gate passes the draft, and makes the draft the reply. |
 | `escalation_agent` | LLM, structured output | Picks the team and priority, writes a handoff note (stored as a `system` ticket message) and an empathetic reply. It never reveals block reasons and never promises refunds. |
-| `request_info` | deterministic | Asks the customer to identify themselves and keeps the ticket open (`awaiting_customer`). |
+| `request_info` | deterministic, LLM only to translate | Asks the customer to identify themselves and keeps the ticket open (`awaiting_customer`). The fixed message is translated into the customer's language if they don't write in English. |
 | `finalize` | deterministic | Appends the reply to the conversation, persists it, and updates the ticket's status, issue type and tags. |
 | `write_memory` | LLM, structured output, plus filters | Extracts durable preferences, personal facts and reported issues as third-person summaries. Code then drops reservation state and one-off requests and skips duplicates. Secrets and payment data are never stored. |
 
