@@ -62,7 +62,7 @@
 <text x="1020.0" y="473.0" class="s">then continue thread</text>
 <rect x="916" y="407" width="98" height="16" rx="8" fill="#6d4fd8"/>
 <text x="965" y="419" class="b">LLM: translate</text>
-<text x="790" y="372" class="l" text-anchor="middle">human asked · critical · blocked · repeat · low confidence</text>
+<text x="815" y="372" class="l" text-anchor="middle">human asked · critical · blocked · repeat · injection · low confidence</text>
 <path d="M240 485 V530 H308" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
 <path d="M500 485 V518 H432" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
 <rect x="310" y="505" width="120" height="50" rx="10" fill="#efeafe" stroke="#6d4fd8" stroke-width="1.6"/>

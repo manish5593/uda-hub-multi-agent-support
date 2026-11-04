@@ -26,7 +26,7 @@ graph TD
     SU -->|how-to / policy| KA[knowledge_agent<br/>RAG over KB]
     SU -->|needs account data/action| AA[account_agent<br/>ReAct + CultPass tools]
     SU -->|guest needs account action| RI[request_info<br/>ask for email<br/>LLM only to translate]
-    SU -->|human requested / critical / blocked /<br/>repeat issue / low confidence| EA[escalation_agent<br/>LLM: handoff note + reply]
+    SU -->|human requested / critical / blocked /<br/>repeat issue / suspected injection /<br/>low confidence| EA[escalation_agent<br/>LLM: handoff note + reply]
     KA --> QG{quality_gate<br/>confidence & grounding}
     AA --> QG
     QG -->|approved| AP[approve]
