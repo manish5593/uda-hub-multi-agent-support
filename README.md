@@ -28,6 +28,7 @@ Business rules and policies are enforced in code, not left to prompts: the LLM p
 |---|---|
 | `solution/` | The complete, working project, with its own guide in [`solution/README.md`](solution/README.md) |
 | `requirements.txt` | Python dependencies |
+| `requirements-injection.txt` | Optional: the local prompt-injection model check |
 
 ```
 solution/
@@ -72,6 +73,8 @@ pip install -r requirements.txt
 cd solution
 cp .env.example .env          # then add your OPENAI_API_KEY (and OPENAI_BASE_URL if using Vocareum)
 ```
+
+Optional: `pip install -r requirements-injection.txt` adds the local prompt-injection model check (about 700 MB to download on first use). Without it, the regex check runs alone.
 
 Put your key in `.env`, which git ignores, and never in `.env.example`, which is committed.
 
@@ -155,7 +158,7 @@ The safeguards each did their job during the run:
 - **Repeat issues:** in scenario 6 Bob's previous ticket was a login problem, so the supervisor escalated him straight away. This took the same route in 4 out of 4 runs.
 - **Identity and confirmation (added after this run):** typing an email doesn't identify a guest. They get a one-time code by email and are identified only after replying with it, and the reply is the same whether or not the email has an account. Cancelling a reservation or changing the subscription waits for the customer's YES, checked in code.
 - **Rate and cost limits (added after this run):** more than 6 messages a minute from one ticket, customer or IP get a "please slow down" reply without any LLM call. Each email gets at most 3 verification codes an hour. Once the daily token budget is used up, new messages go to a human.
-- **Prompt injection in the classifier (added after this run):** the classifier gets customer text marked as data and is told never to follow instructions in it. A code check for injection patterns ("ignore your instructions", a fake "system note", `confidence=1.0`) escalates the ticket whatever confidence the model reports. In a real-model test, the data tags alone didn't stop a fake system note from setting confidence to 1.0, but the code check did.
+- **Prompt injection in the classifier (added after this run):** the classifier gets customer text marked as data and is told never to follow instructions in it. A code check for injection patterns ("ignore your instructions", a fake "system note", `confidence=1.0`) escalates the ticket whatever confidence the model reports. In a real-model test, the data tags alone didn't stop a fake system note from setting confidence to 1.0, but the code check did. An optional second check, a local prompt-injection model (ProtectAI's DeBERTa), runs when `transformers` is installed and catches reworded and non-English attacks the regex misses; the ticket is flagged if either check fires.
 - **Memory hygiene:** memories are third-person summaries of what the customer wrote, never the assistant's replies. Reservation state, named experiences, one-off requests, contact details, claims of a special status or permission ("my refunds are pre-approved") and duplicates are not stored. Such claims are flagged as unverified in the handoff note to the human team.
 
 The model's wording varies from run to run, but the routes and outcomes above were the same across repeated runs.

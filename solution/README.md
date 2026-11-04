@@ -64,6 +64,8 @@ cd solution
 cp .env.example .env        # add OPENAI_API_KEY (and OPENAI_BASE_URL if using Vocareum)
 ```
 
+Optional: `pip install -r requirements-injection.txt` turns on the local prompt-injection model check (`agentic/injection_model.py`). Set `UDAHUB_INJECTION_MODEL=""` to turn it off again.
+
 Put the key in `.env`, which git ignores, and never in `.env.example`, which is committed.
 
 `03_agentic_app.ipynb` is committed with the outputs of a real run (see below), so you can review it without a key.
@@ -122,10 +124,12 @@ python -m pytest tests
   - rate limits per ticket, customer and IP, the daily token budget, the token counter, and hashed limit keys
   - every routing and escalation rule
   - the prompt-injection patterns (attacks flagged, normal requests not) and customer text marked as data
+  - the optional injection model: off without the package, flags only confident injections, survives a crash, and (when `transformers` is installed) catches reworded and non-English attacks the regex misses
 - `tests/test_workflow.py` runs the whole graph end to end through these paths:
   - RAG resolution
   - low-confidence escalation
   - an injected "system note" that sets the classifier's confidence to 1.0: capped, escalated and flagged
+  - a reworded attack the regex misses, caught by the injection model and escalated
   - a blocked customer
   - multi-turn identification with a one-time email code, recalling both short-term and long-term memory
   - email verification (wrong codes, the same reply for unknown emails) and confirmation before cancelling

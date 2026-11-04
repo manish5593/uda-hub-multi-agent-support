@@ -43,4 +43,6 @@ def isolated_dbs(tmp_path, monkeypatch):
     _move_dates_to_today(config.CULTPASS_DB_PATH)
     monkeypatch.setattr(config, "EVENT_LOG_PATH", tmp_path / "events.jsonl")
     monkeypatch.setattr(config, "OUTBOX_PATH", tmp_path / "outbox.jsonl")
+    # The optional injection model is slow to load; tests that need it turn it on themselves
+    monkeypatch.setattr(config, "INJECTION_MODEL", "")
     yield

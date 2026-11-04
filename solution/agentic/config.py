@@ -18,6 +18,10 @@ EMBEDDING_MODEL = os.getenv("UDAHUB_EMBEDDING_MODEL", "text-embedding-3-small")
 CLASSIFIER_MIN_CONFIDENCE = float(os.getenv("UDAHUB_CLASSIFIER_MIN_CONFIDENCE", 0.5))
 # The most confidence a classification can keep when its message looks like a prompt injection
 INJECTION_MAX_CONFIDENCE = 0.3
+# Optional model check for injections, used when transformers is installed (see agentic/injection_model.py).
+# An empty name turns it off.
+INJECTION_MODEL = os.getenv("UDAHUB_INJECTION_MODEL", "protectai/deberta-v3-base-prompt-injection-v2")
+INJECTION_MODEL_MIN_SCORE = float(os.getenv("UDAHUB_INJECTION_MODEL_MIN_SCORE", 0.9))
 RESOLUTION_MIN_CONFIDENCE = float(os.getenv("UDAHUB_RESOLUTION_MIN_CONFIDENCE", 0.7))
 # Minimum retrieval score for a KB article to count as relevant
 RAG_MIN_SCORE_EMBEDDING = float(os.getenv("UDAHUB_RAG_MIN_SCORE", 0.30))

@@ -1,7 +1,7 @@
 """Classifier agent: understands the ticket and produces a structured classification."""
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agentic import config
+from agentic import config, injection_model
 from agentic.agents.common import (INJECTION_PATTERN, add_trace, conversation_text, customer_context_block,
                                    last_user_message)
 from agentic.llm import get_llm
@@ -54,14 +54,19 @@ def classify(state: dict) -> dict:
     ])
     c = result.model_dump()
     # The confidence is the model's own opinion, and the message can set it, so code caps it when the
-    # message tries to instruct the AI; the supervisor escalates such tickets either way
-    c["injection_suspected"] = bool(INJECTION_PATTERN.search(last_user_message(state)))
-    if c["injection_suspected"]:
+    # message tries to instruct the AI; the supervisor escalates such tickets either way.
+    # Two checks: the regex (this app's fields and known phrases) and, if installed, an injection model
+    # (reworded and non-English attacks)
+    message = last_user_message(state)
+    caught_by = [name for name, hit in (("regex", INJECTION_PATTERN.search(message)),
+                                        ("model", injection_model.model_flags_injection(message))) if hit]
+    c["injection_suspected"] = bool(caught_by)
+    if caught_by:
         c["confidence"] = min(c["confidence"], config.INJECTION_MAX_CONFIDENCE)
     entry = (f"[classifier] {c['issue_type']} urgency={c['urgency']} sentiment={c['sentiment']} "
              f"account_action={c['requires_account_action']} confidence={c['confidence']:.2f}"
-             + (" injection_suspected" if c["injection_suspected"] else ""))
+             + (f" injection_suspected ({'+'.join(caught_by)})" if caught_by else ""))
     return {"classification": c, "trace": add_trace(
-        state, entry, event="classify",
+        state, entry, event="classify", injection_checks=caught_by,
         **{k: c[k] for k in ("issue_type", "urgency", "sentiment", "requires_account_action",
                              "human_requested", "language", "confidence", "injection_suspected")})}

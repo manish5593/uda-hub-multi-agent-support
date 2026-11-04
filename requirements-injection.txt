@@ -1,0 +1,3 @@
+# Optional: the local prompt-injection model check (agentic/injection_model.py). About 700 MB to download.
+transformers>=4.40
+torch>=2.2
