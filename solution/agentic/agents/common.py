@@ -15,6 +15,29 @@ PERMISSION_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+# Text that tries to instruct the AI instead of asking for help: overriding its instructions, posing as
+# the system, or setting the classifier's own fields. Code flags it, so routing never relies on the model
+# noticing (or on the confidence it reports, which the same text can set).
+INJECTION_PATTERN = re.compile(
+    r"\b(ignore|disregard|override)\b[^.\n]{0,30}\b(instructions?|rules|prompt)\b|"
+    r"\[\s*system\b|\bsystem\s+(prompt|instructions?)\b|"
+    r"\b(note|message|instructions?)\s+(to|for)\s+(the\s+)?(ai|assistant|classifier|model|bot)\b|"
+    r"\b(set|change|make)\b[^.\n]{0,20}\b(confidence|issue_type|urgency|classification)\b|"
+    r"\b(confidence|issue_type|urgency)\s*[=:]|"
+    r"\bclassify\s+(this|it|me|my\s+\w+)\s+as\b|"
+    r"\byou\s+are\s+now\s+(an?\s+|the\s+)?(admin\w*|developer|system|unrestricted)\b|"
+    r"\bdeveloper\s+mode\b|\bjailbreak|"
+    r"</?\s*customer_message\s*>",
+    re.IGNORECASE,
+)
+CUSTOMER_TAG = re.compile(r"</?\s*customer_message\s*>", re.IGNORECASE)
+
+
+def as_customer_data(text: str) -> str:
+    """Wrap customer text in tags that mark it as data, not instructions. Tags the customer typed are
+    removed first, so they can't close the block early and write "instructions" after it."""
+    return f"<customer_message>\n{CUSTOMER_TAG.sub('', text or '')}\n</customer_message>"
+
 
 def add_trace(state: dict, entry: str, event: str = "note", ticket_id=None, **fields) -> list[str]:
     """Record one agent decision: in the ticket's `trace` (for display) and as a structured event in
@@ -37,11 +60,14 @@ def conversation(state: dict, limit: int = config.MAX_CONVERSATION_MESSAGES) -> 
     return msgs[-limit:]
 
 
-def conversation_text(state: dict) -> str:
+def conversation_text(state: dict, tag_customer: bool = False) -> str:
+    """The conversation as text. With `tag_customer`, each customer message is wrapped by as_customer_data."""
     lines = []
     for m in conversation(state):
-        role = "Customer" if isinstance(m, HumanMessage) else "Assistant"
-        lines.append(f"{role}: {m.content}")
+        if isinstance(m, HumanMessage):
+            lines.append(f"Customer: {as_customer_data(m.content) if tag_customer else m.content}")
+        else:
+            lines.append(f"Assistant: {m.content}")
     return "\n".join(lines)
 
 

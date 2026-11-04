@@ -118,7 +118,7 @@ The rules are evaluated in order:
 3. `legal_or_safety` issue, or `critical` urgency → **escalation**. Urgency is the more severe of the classifier's and
    the one reported in the ticket metadata, so the LLM can raise a ticket's urgency but never lower what the source
    system reported (`effective_urgency`).
-4. Classifier confidence < `0.5` → **escalation**
+4. The message looks like a prompt injection (`injection_suspected`, set by code), or classifier confidence < `0.5` → **escalation**. The confidence is the model's own opinion and the message can set it, so code also caps it at `0.3` for a suspected injection.
 5. Blocked customer whose issue involves their account: login, reservations, subscription, billing, a complaint, or any account action → **escalation** (Trust & Safety policy)
 6. Identified customer reports a blocked account → **escalation**
 7. Repeat problem: the customer reported the same issue type in a previous ticket, or this ticket was already
@@ -180,6 +180,7 @@ Each decision with real consequences is enforced in code rather than left to a p
 | A guest posing as a customer by typing their email | The guest is identified only after replying with a one-time code sent to that email (hashed in the state, 10 minutes, 3 attempts) | `_verify_guest`, `tools/verification.py` |
 | Finding out which emails have an account | The reply is the same for known and unknown emails, and no code is sent to an unknown one | `VERIFICATION_MESSAGES`, `verification.start` |
 | Cancelling or changing the subscription without the customer's say-so | The tool first returns `needs_confirmation`; the change runs only if the customer's next message is a clear yes, checked in code | `build_account_tools`, `is_confirmation` |
+| A message that tries to instruct the AI, e.g. a fake "system note" setting `confidence=1.0` | The classifier gets customer text inside `<customer_message>` tags as data (typed tags are removed), and is told never to follow instructions in it. Code also checks for injection patterns: a match caps the confidence, escalates the ticket and flags it in the handoff note | `as_customer_data`, `INJECTION_PATTERN`, `classify`, `route_ticket` |
 | A flood of messages (spam or a runaway script) running up the LLM bill | More than 6 messages a minute from one ticket, customer or client IP get a fixed "please slow down" reply before any LLM call | `rate_limits.check_message`, `process_ticket` |
 | Guessing verification codes by asking for new ones | At most 3 codes per email per hour, counted the same for registered and unknown emails | `rate_limits.can_send_code`, `_verify_guest` |
 | Runaway token spend | Every LLM call's tokens are counted; once the 24-hour budget is used up, new messages are saved and handed to a human without calling the LLM | `TokenCounter`, `DAILY_TOKEN_BUDGET` |
@@ -213,12 +214,12 @@ Each event has the same base fields: `ts`, `ticket_id`, `agent`, `event` and `me
 | `event` | Logged by | Extra fields |
 |---|---|---|
 | `load_context` | memory | `customer`, `identified`, `ticket_status`, `memories`, `prior_tickets` |
-| `classify` | classifier | `issue_type`, `urgency`, `sentiment`, `requires_account_action`, `human_requested`, `language`, `confidence` |
+| `classify` | classifier | `issue_type`, `urgency`, `sentiment`, `requires_account_action`, `human_requested`, `language`, `confidence`, `injection_suspected` |
 | `identify`, `route` | supervisor | `customer`, `verification`; `route`, `reason` |
 | `retrieve` | knowledge_agent | `articles`: title and score |
 | `tools` | account_agent | `tools`: tool, args, success |
 | `assess`, `approve` | quality_gate | `confidence`, `grounded`, `answered_by_evidence`, `needs_human`, `awaiting_customer`, `reason` |
-| `escalate` | escalation_agent | `team`, `priority`, `reason`, `unverified_claims` |
+| `escalate` | escalation_agent | `team`, `priority`, `reason`, `unverified_claims`, `injection_suspected` |
 | `request_info` | request_info | `asked`, `language` |
 | `finalize` | finalize | `status`, `issue_type`, `resolver` |
 | `memory_write` | memory | `stored`, `dropped` |

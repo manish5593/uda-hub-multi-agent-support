@@ -53,6 +53,8 @@ def route_ticket(classification: dict, customer: dict, ticket_status: str,
     if urgency == "critical":
         source = "reported in the ticket metadata" if reported_urgency == "critical" else "classified"
         return "escalation_agent", f"critical urgency ({source}) requires a human"
+    if c.get("injection_suspected"):
+        return "escalation_agent", "the message tries to instruct the AI (possible prompt injection)"
     if c.get("confidence", 0) < config.CLASSIFIER_MIN_CONFIDENCE:
         return "escalation_agent", f"classification confidence {c.get('confidence', 0):.2f} is too low"
     if customer.get("identified") and customer.get("is_blocked") and (

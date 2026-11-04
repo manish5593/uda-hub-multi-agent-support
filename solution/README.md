@@ -121,9 +121,11 @@ python -m pytest tests
   - keyword retrieval
   - rate limits per ticket, customer and IP, the daily token budget, the token counter, and hashed limit keys
   - every routing and escalation rule
+  - the prompt-injection patterns (attacks flagged, normal requests not) and customer text marked as data
 - `tests/test_workflow.py` runs the whole graph end to end through these paths:
   - RAG resolution
   - low-confidence escalation
+  - an injected "system note" that sets the classifier's confidence to 1.0: capped, escalated and flagged
   - a blocked customer
   - multi-turn identification with a one-time email code, recalling both short-term and long-term memory
   - email verification (wrong codes, the same reply for unknown emails) and confirmation before cancelling

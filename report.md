@@ -14,7 +14,7 @@ sessions.
 | **Models** | `gpt-4o-mini` for every agent; `text-embedding-3-small` for retrieval |
 | **Data** | Two SQLite databases: `cultpass.db` (customers, subscriptions, experiences, reservations) and `udahub.db` (tickets, messages, 18 knowledge articles, long-term memory) |
 | **Demonstration** | `solution/03_agentic_app.ipynb`, committed with the outputs of a real-model run: 13 scenarios, 5 edge cases, and demos of routing, retrieval, tools, memory and logs |
-| **Tests** | 56 offline tests (29 unit, 27 end-to-end through the graph with a scripted fake LLM), no API key needed |
+| **Tests** | 61 offline tests (32 unit, 29 end-to-end through the graph with a scripted fake LLM), no API key needed |
 | **Environment** | Python 3.11, LangGraph 1.2.15, LangChain 1.4.6, langchain-openai 1.7.2, SQLAlchemy 2.1 |
 
 The main lesson matched what I'd learned building earlier agent systems: **the LLM proposes, code decides.**
@@ -55,7 +55,7 @@ previous issues, and the urgency reported in the metadata. Escalation comes firs
 - human requests;
 - legal or safety issues;
 - critical urgency, whichever of the classified or reported urgency is more severe;
-- low classifier confidence;
+- a suspected prompt injection, or low classifier confidence;
 - blocked accounts;
 - **repeat problems**: the customer already reported this issue type.
 
